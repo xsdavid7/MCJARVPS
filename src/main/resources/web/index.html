@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCJARVPS - Web Terminal</title>
+    <!-- Xterm CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            background-color: #0c0d10;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            color: #e0e0e0;
+            overflow: hidden;
+        }
+
+        /* --- LOGIN FORM --- */
+        #login-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, #181b24 0%, #0a0b0e 100%);
+        }
+
+        .login-box {
+            background: #141720;
+            border: 1px solid #282f44;
+            border-radius: 8px;
+            padding: 36px 32px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .login-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #00ff88;
+            letter-spacing: 1px;
+            margin-bottom: 6px;
+            font-family: monospace;
+        }
+
+        .login-subtitle {
+            font-size: 13px;
+            color: #8c96ab;
+        }
+
+        .form-group {
+            margin-bottom: 18px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #b0b8c8;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px 14px;
+            background: #0c0e14;
+            border: 1px solid #2b3248;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .form-group input:focus {
+            border-color: #00ff88;
+            box-shadow: 0 0 8px rgba(0, 255, 136, 0.2);
+        }
+
+        .btn-submit {
+            width: 100%;
+            padding: 11px;
+            background: #00ff88;
+            color: #050608;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+        }
+
+        .btn-submit:hover {
+            background: #00e078;
+        }
+
+        .btn-submit:active {
+            transform: scale(0.99);
+        }
+
+        .error-message {
+            color: #ff5252;
+            font-size: 13px;
+            margin-top: 12px;
+            text-align: center;
+            display: none;
+        }
+
+        /* --- FULLSCREEN PURE CONSOLE (PUTTY STYLE) --- */
+        #terminal-container {
+            display: none;
+            width: 100vw;
+            height: 100vh;
+            background-color: #000000;
+            position: absolute;
+            top: 0;
+            left: 0;
+            overflow: hidden;
+        }
+
+        #terminal {
+            width: 100%;
+            height: 100%;
+            background-color: #000000;
+        }
+
+        /* Pure terminal styling without scrollbars */
+        .xterm-viewport::-webkit-scrollbar {
+            width: 8px;
+        }
+        .xterm-viewport::-webkit-scrollbar-track {
+            background: #000;
+        }
+        .xterm-viewport::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 1. Formular de Login Standard -->
+    <div id="login-container">
+        <div class="login-box">
+            <div class="login-header">
+                <div class="login-title">&gt;_ MCJARVPS CONSOLE</div>
+                <div class="login-subtitle">Pterodactyl Linux Guest Terminal</div>
+            </div>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="username">Utilizator</label>
+                    <input type="text" id="username" name="username" placeholder="admin" autocomplete="username" required autofocus />
+                </div>
+                <div class="form-group">
+                    <label for="password">Parolă</label>
+                    <input type="password" id="password" name="password" placeholder="••••••••••••" autocomplete="current-password" required />
+                </div>
+                <button type="submit" class="btn-submit" id="btn-login">Conectare Terminal</button>
+                <div class="error-message" id="error-msg">Autentificare eșuată!</div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 2. Pure Terminal (stil PuTTY, fără HTML vizibil) -->
+    <div id="terminal-container">
+        <div id="terminal"></div>
+    </div>
+
+    <!-- Xterm JS & Fit Addon -->
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+
+    <script>
+        const loginContainer = document.getElementById('login-container');
+        const loginForm = document.getElementById('login-form');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+        const errorMsg = document.getElementById('error-msg');
+        const terminalContainer = document.getElementById('terminal-container');
+        const terminalDiv = document.getElementById('terminal');
+
+        let term = null;
+        let fitAddon = null;
+        let ws = null;
+        let sessionToken = null;
+
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorMsg.style.display = 'none';
+
+            const user = usernameInput.value.trim();
+            const pass = passwordInput.value;
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: user, password: pass })
+                });
+
+                const data = await response.json();
+                if (data.success && data.token) {
+                    sessionToken = data.token;
+                    launchTerminal();
+                } else {
+                    errorMsg.textContent = data.message || 'Date de autentificare invalide!';
+                    errorMsg.style.display = 'block';
+                }
+            } catch (err) {
+                errorMsg.textContent = 'Eroare de conexiune la server!';
+                errorMsg.style.display = 'block';
+            }
+        });
+
+        function launchTerminal() {
+            // Ascunde formularul de login si afiseaza consola pe tot ecranul
+            loginContainer.style.display = 'none';
+            terminalContainer.style.display = 'block';
+
+            // Configurare xterm.js exact ca in PuTTY
+            term = new Terminal({
+                cursorBlink: true,
+                cursorStyle: 'block',
+                fontFamily: 'Consolas, "Courier New", monospace',
+                fontSize: 15,
+                lineHeight: 1.15,
+                theme: {
+                    background: '#000000',
+                    foreground: '#ffffff',
+                    cursor: '#00ff88',
+                    selectionBackground: '#444444'
+                },
+                allowProposedApi: true,
+                scrollback: 10000
+            });
+
+            fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+            term.open(terminalDiv);
+            fitAddon.fit();
+
+            // WebSocket connection
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(sessionToken)}`;
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                term.focus();
+                sendResize();
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'output' && msg.data) {
+                        term.write(msg.data);
+                    }
+                } catch (_) {
+                    term.write(event.data);
+                }
+            };
+
+            ws.onclose = () => {
+                term.write('\r\n\x1b[31m[!] Conexiunea WebSocket a fost închisă de server.\x1b[0m\r\n');
+            };
+
+            ws.onerror = (err) => {
+                term.write('\r\n\x1b[31m[!] Eroare WebSocket.\x1b[0m\r\n');
+            };
+
+            // Trimitere keystrokes (Ctrl+C, F1-F12, taste speciale transmise direct)
+            term.onData((data) => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'input', data: data }));
+                }
+            });
+
+            // Redimensionare automata
+            function sendResize() {
+                if (fitAddon && ws && ws.readyState === WebSocket.OPEN) {
+                    fitAddon.fit();
+                    ws.send(JSON.stringify({
+                        type: 'resize',
+                        cols: term.cols,
+                        rows: term.rows
+                    }));
+                }
+            }
+
+            window.addEventListener('resize', () => {
+                if (fitAddon) {
+                    fitAddon.fit();
+                    sendResize();
+                }
+            });
+
+            // Suport Clipboard Paste cu Ctrl+V
+            window.addEventListener('paste', (e) => {
+                const text = e.clipboardData.getData('text');
+                if (text && ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'input', data: text }));
+                }
+            });
+
+            term.focus();
+        }
+    </script>
+</body>
+</html>
